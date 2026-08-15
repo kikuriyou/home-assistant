@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "severity",
+          "summary",
+          "basis",
+          "evidence",
+          "current_risk",
+          "minimal_fix"
+        ],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "severity": {"enum": ["critical", "high", "medium"]},
+          "summary": {"type": "string", "minLength": 1},
+          "basis": {"type": "string", "minLength": 1},
+          "evidence": {"type": "string", "minLength": 1},
+          "current_risk": {"type": "string", "minLength": 1},
+          "minimal_fix": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}
