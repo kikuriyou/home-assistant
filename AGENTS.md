@@ -13,6 +13,7 @@
 - Do not simply agree with the user; prioritize candid, evidence-based responses and proposals that lead to meaningful improvements.
 - When the user gives development or collaboration feedback that should apply to future tasks, update this file in the same task unless the user asks otherwise.
 - Record only concise, reusable project-wide guidance here; keep task-specific requirements in the task documentation.
+- Do not put personal data, secrets, or environment-specific details—including local or cloud deployment identifiers, endpoints, and configuration—in `.agents/`, `AGENTS.md`, or `.gitignore`; use generic placeholders and keep real values in ignored local configuration or an external secret manager.
 - Treat every task directory except the explicitly designated current task as read-only. Create a new task directory for follow-up work, and modify an older task only when the user explicitly asks.
 - Do not read `tasks/archived/` unless the user explicitly asks.
 
