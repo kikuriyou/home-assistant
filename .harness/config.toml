@@ -1,0 +1,41 @@
+[model_aliases.planner]
+runtime = "codex"
+model = "gpt-5.6-sol"
+effort = "xhigh"
+
+[model_aliases.worker]
+runtime = "codex"
+model = "gpt-5.6-luna"
+effort = "xhigh"
+
+[model_aliases.worker_escalation]
+runtime = "codex"
+model = "gpt-5.6-terra"
+effort = "max"
+
+[model_aliases.plan_reviewer]
+runtime = "claude"
+model = "fable"
+effort = "xhigh"
+
+[model_aliases.implementation_reviewer]
+runtime = "claude"
+model = "opus"
+effort = "max"
+
+[assignments]
+planner = "planner"
+worker = "worker"
+worker_escalation = "worker_escalation"
+spec_review = "plan_reviewer"
+plan_review = "plan_reviewer"
+implementation_review = "implementation_reviewer"
+
+[approvals]
+spec = "required"
+plan = "skipped"
+implementation_plan = "skipped"
+
+[timeouts]
+agent_seconds = 1800
+command_seconds = 900

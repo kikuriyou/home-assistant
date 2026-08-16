@@ -116,6 +116,20 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(run_dir, resumed_dir)
         self.assertEqual(state["run_id"], resumed_state["run_id"])
 
+    def test_start_bootstraps_missing_config_without_overwriting(self) -> None:
+        shutil.rmtree(self.repo.root / ".harness")
+        config = self.repo.root / ".harness/config.toml"
+        run_dir, _, _ = self.repo.start()
+        self.assertEqual(CONFIG_PATH.read_bytes(), config.read_bytes())
+        self.assertEqual(0o600, stat.S_IMODE(config.stat().st_mode))
+
+        custom = config.read_text().replace("agent_seconds = 1800", "agent_seconds = 123")
+        config.write_text(custom)
+        resumed_dir, _, resumed = self.repo.start()
+        self.assertTrue(resumed)
+        self.assertEqual(run_dir, resumed_dir)
+        self.assertEqual(custom, config.read_text())
+
     def test_transition_approval_and_terminal_protection(self) -> None:
         run_dir, _, _ = self.repo.start()
         harness.transition(run_dir, "spec_review")

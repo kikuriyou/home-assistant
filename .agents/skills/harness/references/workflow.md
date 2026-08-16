@@ -31,7 +31,7 @@ Keep orchestration in the parent Codex; do not configure an orchestrator role. K
 For `$harness tasks/<task-id>`:
 
 1. Resolve the task path inside the Git repository and require `user_requests.md`.
-2. Load and strictly validate `.harness/config.toml`.
+2. If `.harness/config.toml` is missing, atomically copy the bundled `assets/config.example.toml`; never overwrite an existing path. Then load and strictly validate the effective config.
 3. Inspect non-terminal runs for the same task. Resume the newest safe run; present pending input or approval when applicable. Ask before starting after a terminal run.
 4. Create `.harness/runs/.gitignore` with exactly `*` if missing. Refuse tracked or unignored run artifacts.
 5. Snapshot the effective config, review schema, task inputs, project rules, Git HEAD, tracked diff, and untracked manifest.

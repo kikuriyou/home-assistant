@@ -2,14 +2,14 @@
 
 ## Requirements
 
-Use Linux or macOS, a Git repository, and Python 3.11 or newer. The MVP was verified against Git 2.25.1, Codex CLI 0.147.0, and Claude Code 2.1.232. Later compatible versions are acceptable when their required flags remain available.
+Use Linux or macOS, a Git repository, and `uv`. The MVP was verified against Git 2.25.1, Codex CLI 0.147.0, and Claude Code 2.1.232. Later compatible versions are acceptable when their required flags remain available.
 
 The harness never installs or updates these tools. Model availability and authentication are checked only when the corresponding stage first needs them.
 
-With `uv`, run the helper without adding a project dependency:
+Run every helper command through `uv`-managed Python 3.11 without adding a project dependency:
 
 ```bash
-uv run --no-project --python 3.11 python .agents/skills/harness/scripts/harness.py --help
+uv run --no-cache --no-python-downloads --no-project --python 3.11 python .agents/skills/harness/scripts/harness.py --help
 ```
 
 ## Install the Skill
@@ -25,14 +25,9 @@ Codex discovers repository Skills directly. Restart Codex only if a newly create
 
 ## Configure a project
 
-Copy [../assets/config.example.toml](../assets/config.example.toml) to `.harness/config.toml` and edit only the model aliases, assignment mappings, approvals, and timeouts required by the project:
+On first start, the helper atomically copies [../assets/config.example.toml](../assets/config.example.toml) to a missing `.harness/config.toml`. It never overwrites an existing path. Edit the generated model aliases, assignment mappings, approvals, or timeouts only when the defaults do not fit the project.
 
-```bash
-mkdir -p .harness
-cp .agents/skills/harness/assets/config.example.toml .harness/config.toml
-```
-
-The harness does not generate or overwrite config. On the first run it creates `.harness/runs/.gitignore` containing `*`, verifies that run artifacts are ignored and untracked, and stores them with owner-only permissions.
+The first run also creates `.harness/runs/.gitignore` containing `*`, verifies that run artifacts are ignored and untracked, and stores them with owner-only permissions.
 
 ## Invoke and control a run
 
@@ -52,7 +47,7 @@ Run state and child/verification logs live under `.harness/runs/<run-id>/`. Task
 
 ## Troubleshoot
 
-- Missing `.harness/config.toml`: copy the example explicitly; the harness will not create it.
+- Invalid `.harness/config.toml`: fix or remove it explicitly; the harness preserves existing paths and only bootstraps a truly missing config.
 - `blocked`: resolve the reported environment, authentication, permission, baseline, or ambiguous-diff condition, then start a new run or resume only when the saved checkpoint is safe.
 - `failed`: inspect unresolved quality findings and exhausted correction counts. Do not relabel it as an environment failure.
 - `awaiting_input`: answer the recorded pending question, especially before overlapping existing changes.

@@ -13,14 +13,14 @@ Treat the supplied task documents as authoritative. Do not restart settled requi
 2. Read the nearest `AGENTS.md`, `user_requests.md`, `spec.md`, `plan.md`, and `backlog.md`. Never read archived task directories unless explicitly requested.
 3. Read [references/workflow.md](references/workflow.md) before starting or resuming a run.
 4. Read [references/usage.md](references/usage.md) only for installation, invocation, status, recovery, or troubleshooting guidance.
-5. Run the deterministic helper with Python 3.11 or newer for config, state, snapshot, review, verification, and completion checks. Do not recreate those checks in prose or ad hoc shell.
+5. Run every deterministic-helper command through `uv run --no-cache --no-python-downloads --no-project --python 3.11 python .agents/skills/harness/scripts/harness.py`. Never invoke it with ambient `python` or `python3`, and do not recreate its checks in prose or ad hoc shell.
 
 ## Enforce preflight
 
 Before modifying project files:
 
 - Require a Git repository, the task directory, and `user_requests.md`.
-- Require `.harness/config.toml`; if absent, point to [assets/config.example.toml](assets/config.example.toml) and stop without generating it.
+- On first start, let the helper atomically create a missing `.harness/config.toml` from [assets/config.example.toml](assets/config.example.toml), tell the user it was created and may be edited, then continue. Never overwrite an existing config.
 - Record Git HEAD, tracked changes, and untracked files. Preserve all pre-existing user changes.
 - Refuse to start if `.harness/runs/` artifacts are tracked or not ignored.
 - Stop at `awaiting_input` when a planned write scope overlaps a starting user change.

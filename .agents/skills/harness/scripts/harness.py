@@ -379,8 +379,8 @@ def start_run(task: Path, *, allow_new_after_terminal: bool = False) -> tuple[Pa
     if not task.is_dir() or not (task / "user_requests.md").is_file():
         raise HarnessError("task directory and user_requests.md are required")
     config_path = root / ".harness" / "config.toml"
-    if not config_path.is_file():
-        raise HarnessError("missing .harness/config.toml; copy the Skill config example explicitly")
+    if not config_path.exists() and not config_path.is_symlink():
+        atomic_write(config_path, (skill_root() / "assets" / "config.example.toml").read_bytes())
     config = load_config(config_path)
     runs = ensure_runs_ignored(root)
     task_rel = relative(root, task)
