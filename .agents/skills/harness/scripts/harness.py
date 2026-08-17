@@ -378,6 +378,12 @@ def start_run(task: Path, *, allow_new_after_terminal: bool = False) -> tuple[Pa
     task = inside(root, task)
     if not task.is_dir() or not (task / "user_requests.md").is_file():
         raise HarnessError("task directory and user_requests.md are required")
+    spec = task / "spec.md"
+    if not spec.is_file() or not spec.read_text().strip():
+        raise HarnessError(
+            "spec.md is missing or empty; offer to create it from user_requests.md "
+            "and start only after the user confirms it is complete"
+        )
     config_path = root / ".harness" / "config.toml"
     if not config_path.exists() and not config_path.is_symlink():
         atomic_write(config_path, (skill_root() / "assets" / "config.example.toml").read_bytes())

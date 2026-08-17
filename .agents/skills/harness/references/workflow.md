@@ -31,12 +31,15 @@ Keep orchestration in the parent Codex; do not configure an orchestrator role. K
 For `$harness tasks/<task-id>`:
 
 1. Resolve the task path inside the Git repository and require `user_requests.md`.
-2. If `.harness/config.toml` is missing, atomically copy the bundled `assets/config.example.toml`; never overwrite an existing path. Then load and strictly validate the effective config.
-3. Inspect non-terminal runs for the same task. Resume the newest safe run; present pending input or approval when applicable. Ask before starting after a terminal run.
-4. Create `.harness/runs/.gitignore` with exactly `*` if missing. Refuse tracked or unignored run artifacts.
-5. Snapshot the effective config, review schema, task inputs, project rules, Git HEAD, tracked diff, and untracked manifest.
-6. Compare starting changes with every planned write scope. Move to `awaiting_input` on overlap without editing, reset, stash, checkout, or rollback.
-7. Acquire the run file lock before mutation and hold it for the parent operation.
+2. Before invoking the helper or any child, inspect `spec.md`. Treat it as unready when it is missing or empty, has material unresolved decisions, or lacks testable ACs. State the gaps and ask whether the user wants help deriving it from `user_requests.md`; do not create harness configuration or run artifacts.
+3. If the user accepts, conduct the specification dialogue directly in the parent using [Specification and planning](#specification-and-planning). Present the final draft after all material questions are settled, write `spec.md` only after explicit confirmation, then ask separately whether to start the delivery run. If the user declines or pauses, stop without starting a run.
+4. Require a non-empty, settled `spec.md`, then invoke the helper only after the user explicitly confirms the delivery run should start.
+5. If `.harness/config.toml` is missing, atomically copy the bundled `assets/config.example.toml`; never overwrite an existing path. Then load and strictly validate the effective config.
+6. Inspect non-terminal runs for the same task. Resume the newest safe run; present pending input or approval when applicable. Ask before starting after a terminal run.
+7. Create `.harness/runs/.gitignore` with exactly `*` if missing. Refuse tracked or unignored run artifacts.
+8. Snapshot the effective config, review schema, task inputs, project rules, Git HEAD, tracked diff, and untracked manifest.
+9. Compare starting changes with every planned write scope. Move to `awaiting_input` on overlap without editing, reset, stash, checkout, or rollback.
+10. Acquire the run file lock before mutation and hold it for the parent operation.
 
 Create run directories and files with owner-only permissions. Never log the full environment or inspect credentials without a task-specific need.
 

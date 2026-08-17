@@ -10,16 +10,20 @@ Treat the supplied task documents as authoritative. Do not restart settled requi
 ## Enter the workflow
 
 1. Require a task directory, normally from `$harness tasks/<task-id>`.
-2. Read the nearest `AGENTS.md`, `user_requests.md`, `spec.md`, `plan.md`, and `backlog.md`. Never read archived task directories unless explicitly requested.
+2. Read the nearest `AGENTS.md` and `user_requests.md`, then read `spec.md`, `plan.md`, and `backlog.md` when present. Never read archived task directories unless explicitly requested.
 3. Read [references/workflow.md](references/workflow.md) before starting or resuming a run.
 4. Read [references/usage.md](references/usage.md) only for installation, invocation, status, recovery, or troubleshooting guidance.
 5. Run every deterministic-helper command through `uv run --no-cache --no-python-downloads --no-project --python 3.11 python .agents/skills/harness/scripts/harness.py`. Never invoke it with ambient `python` or `python3`, and do not recreate its checks in prose or ad hoc shell.
 
 ## Enforce preflight
 
-Before modifying project files:
+Before invoking the helper, spawning a child, or modifying project files:
 
 - Require a Git repository, the task directory, and `user_requests.md`.
+- Treat `spec.md` as unready when it is missing or empty, has material unresolved decisions, or lacks testable acceptance criteria. Explain the specific gaps and ask whether the user wants help creating or completing it from `user_requests.md`. Do not start a run or create harness configuration or run artifacts.
+- If the user accepts, follow the specification dialogue in the workflow reference directly with the user, one material question at a time. Present the completed draft and write `spec.md` only after explicit confirmation.
+- After preparing `spec.md`, stop and ask for separate confirmation to start the delivery run. Do not treat the original invocation or acceptance of specification help as that confirmation.
+- Start only with a non-empty, settled `spec.md`.
 - On first start, let the helper atomically create a missing `.harness/config.toml` from [assets/config.example.toml](assets/config.example.toml), tell the user it was created and may be edited, then continue. Never overwrite an existing config.
 - Record Git HEAD, tracked changes, and untracked files. Preserve all pre-existing user changes.
 - Refuse to start if `.harness/runs/` artifacts are tracked or not ignored.

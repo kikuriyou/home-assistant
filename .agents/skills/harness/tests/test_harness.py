@@ -116,6 +116,20 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(run_dir, resumed_dir)
         self.assertEqual(state["run_id"], resumed_state["run_id"])
 
+    def test_start_requires_non_empty_spec_before_mutation(self) -> None:
+        spec = self.repo.task / "spec.md"
+        spec.unlink()
+        shutil.rmtree(self.repo.root / ".harness")
+
+        for content in (None, " \n", "\u3000\n"):
+            if content is not None:
+                spec.write_text(content)
+            with self.subTest(content=content), self.assertRaisesRegex(
+                harness.HarnessError, "offer to create it from user_requests.md"
+            ):
+                self.repo.start()
+            self.assertFalse((self.repo.root / ".harness").exists())
+
     def test_start_bootstraps_missing_config_without_overwriting(self) -> None:
         shutil.rmtree(self.repo.root / ".harness")
         config = self.repo.root / ".harness/config.toml"

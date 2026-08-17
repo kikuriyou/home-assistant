@@ -8,6 +8,7 @@
 ## Working rules
 
 - Prefer existing tools and platform features; write custom code only when they cannot meet the requirements.
+- Prefer declarative, version-controlled configuration. For platform-managed or UI-only state, document its ownership and backup/restore path instead of adding brittle synchronization.
 - Apply YAGNI. Do not add speculative roles, providers, abstractions, or configuration.
 - Keep changes small, focused, and consistent with the current task.
 - Do not simply agree with the user; prioritize candid, evidence-based responses and proposals that lead to meaningful improvements.
