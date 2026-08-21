@@ -26,6 +26,8 @@ SCHEMA_VERSION = 1
 PHASES = (
     "spec",
     "spec_review",
+    "design",
+    "design_review",
     "plan",
     "plan_review",
     "baseline_verification",
@@ -45,8 +47,14 @@ STATUSES = {
     "aborted",
 }
 TERMINAL = {"completed", "failed", "blocked", "aborted"}
-ARTIFACT_PHASE = {"spec": "spec", "plan": "plan", "implementation_plan": "plan"}
-REVIEW_STAGES = {"spec_review", "plan_review", "implementation_review"}
+ARTIFACT_PHASE = {
+    "spec": "spec",
+    "design": "design",
+    "plan": "plan",
+    "implementation_plan": "plan",
+}
+APPROVAL_ARTIFACTS = {"spec", "plan", "implementation_plan"}
+REVIEW_STAGES = {"spec_review", "design_review", "plan_review", "implementation_review"}
 REVIEW_FIELDS = {
     "id",
     "severity",
@@ -58,7 +66,9 @@ REVIEW_FIELDS = {
 }
 FORWARD = {
     "spec": {"spec_review"},
-    "spec_review": {"plan"},
+    "spec_review": {"design"},
+    "design": {"design_review"},
+    "design_review": {"plan"},
     "plan": {"plan_review"},
     "plan_review": {"baseline_verification", "implementation"},
     "baseline_verification": {"implementation"},
@@ -70,6 +80,7 @@ FORWARD = {
 }
 CORRECTIONS = {
     "spec_review": ("spec", "planner", "spec_review"),
+    "design_review": ("design", "planner", "design_review"),
     "plan_review": ("plan", "planner", "plan_review"),
     "deterministic_verification": (
         "implementation",
@@ -122,6 +133,10 @@ def digest_file(path: Path) -> str | None:
     if path.is_symlink():
         return digest_bytes(os.readlink(path).encode())
     return digest_bytes(path.read_bytes())
+
+
+def non_empty_text(path: Path) -> bool:
+    return path.is_file() and bool(path.read_text().strip())
 
 
 def secure_dir(path: Path) -> None:
@@ -211,7 +226,7 @@ def validate_config(value: dict[str, Any]) -> dict[str, Any]:
     approvals = value["approvals"]
     if not isinstance(approvals, dict):
         raise HarnessError("approvals must be a table")
-    exact_keys(approvals, {"spec", "plan", "implementation_plan"}, "approvals")
+    exact_keys(approvals, APPROVAL_ARTIFACTS, "approvals")
     for artifact, mode in approvals.items():
         if mode not in {"required", "skipped"}:
             raise HarnessError(f"invalid approval mode for {artifact}")
@@ -379,7 +394,7 @@ def start_run(task: Path, *, allow_new_after_terminal: bool = False) -> tuple[Pa
     if not task.is_dir() or not (task / "user_requests.md").is_file():
         raise HarnessError("task directory and user_requests.md are required")
     spec = task / "spec.md"
-    if not spec.is_file() or not spec.read_text().strip():
+    if not non_empty_text(spec):
         raise HarnessError(
             "spec.md is missing or empty; offer to create it from user_requests.md "
             "and start only after the user confirms it is complete"
@@ -392,7 +407,7 @@ def start_run(task: Path, *, allow_new_after_terminal: bool = False) -> tuple[Pa
     task_rel = relative(root, task)
     unfinished = existing_run(runs, task_rel)
     if unfinished:
-        return unfinished[0], unfinished[1], True
+        return unfinished[0], refresh_state(unfinished[0]), True
     terminal = [
         load_state(path)
         for path in runs.iterdir()
@@ -469,6 +484,12 @@ def invalidate_from(state: dict[str, Any], artifact: str) -> None:
             if state["approvals"][name]["mode"] == "required":
                 state["approvals"][name].update(status="pending", hash=None)
         state["reviews"] = {}
+    elif artifact == "design":
+        for name in ("plan", "implementation_plan"):
+            if state["approvals"][name]["mode"] == "required":
+                state["approvals"][name].update(status="pending", hash=None)
+        for stage in ("design_review", "plan_review", "implementation_review"):
+            state["reviews"].pop(stage, None)
     else:
         for name in ("plan", "implementation_plan"):
             if state["approvals"][name]["mode"] == "required":
@@ -488,12 +509,18 @@ def refresh_state(run_dir: Path) -> dict[str, Any]:
             return state
         root = Path(state["repo_root"])
         changed_artifact: str | None = None
-        for artifact in ("spec", "plan", "implementation_plan"):
+        for artifact in ARTIFACT_PHASE:
             current = digest_file(artifact_path(root, state, artifact))
-            approval = state["approvals"][artifact]
-            if state["artifact_hashes"].get(artifact) != current:
+            approval = state["approvals"].get(artifact)
+            known = artifact in state["artifact_hashes"]
+            if (
+                known
+                and state["artifact_hashes"][artifact] != current
+                or not known
+                and (artifact != "design" or state["phase"] not in {"spec", "spec_review"})
+            ):
                 changed_artifact = changed_artifact or artifact
-            if approval["status"] == "approved" and approval["hash"] != current:
+            if approval and approval["status"] == "approved" and approval["hash"] != current:
                 approval.update(status="pending", hash=None)
             state["artifact_hashes"][artifact] = current
         if changed_artifact:
@@ -529,6 +556,7 @@ def require_active(state: dict[str, Any]) -> None:
 
 
 def transition(run_dir: Path, phase: str | None = None, status: str | None = None) -> dict[str, Any]:
+    refresh_state(run_dir)
     with run_lock(run_dir):
         state = load_state(run_dir)
         require_active(state)
@@ -541,8 +569,16 @@ def transition(run_dir: Path, phase: str | None = None, status: str | None = Non
             raise HarnessError("use completion check to enter completed")
         if phase != current:
             if phase in FORWARD[current]:
+                if current in REVIEW_STAGES:
+                    review = state["reviews"].get(current)
+                    if not review or not review["passed"]:
+                        raise HarnessError(f"{current} must pass before advancing")
                 if current == "spec_review" and state["approvals"]["spec"]["status"] == "pending":
-                    raise HarnessError("spec approval is required before plan")
+                    raise HarnessError("spec approval is required before design")
+                if current == "design" and not non_empty_text(
+                    artifact_path(Path(state["repo_root"]), state, "design")
+                ):
+                    raise HarnessError("non-empty design.md is required before design review")
                 if current == "plan_review":
                     for artifact in ("plan", "implementation_plan"):
                         if state["approvals"][artifact]["status"] == "pending":
@@ -560,6 +596,8 @@ def transition(run_dir: Path, phase: str | None = None, status: str | None = Non
                     state["reviews"].pop("implementation_review", None)
             else:
                 raise HarnessError(f"transition not allowed: {current} -> {phase}")
+        if current == "spec_review" and phase == "design":
+            state["discussion"] = {"decisions": [], "constraints": [], "remaining": []}
         state.update(phase=phase, status=status)
         if status != "awaiting_input":
             state["pending_input"] = None
@@ -568,8 +606,9 @@ def transition(run_dir: Path, phase: str | None = None, status: str | None = Non
 
 
 def approve(run_dir: Path, artifact: str) -> dict[str, Any]:
-    if artifact not in ARTIFACT_PHASE:
+    if artifact not in APPROVAL_ARTIFACTS:
         raise HarnessError(f"unknown approval artifact: {artifact}")
+    refresh_state(run_dir)
     with run_lock(run_dir):
         state = load_state(run_dir)
         require_active(state)
@@ -1122,9 +1161,16 @@ def record_review(run_dir: Path, stage: str, review: dict[str, Any]) -> dict[str
     if stage not in REVIEW_STAGES:
         raise HarnessError("invalid review stage")
     review = validate_review(review)
+    refresh_state(run_dir)
     with run_lock(run_dir):
         state = load_state(run_dir)
         require_active(state)
+        if state["phase"] != stage:
+            raise HarnessError(f"cannot record {stage} while phase is {state['phase']}")
+        if stage == "design_review" and not non_empty_text(
+            artifact_path(Path(state["repo_root"]), state, "design")
+        ):
+            raise HarnessError("cannot review missing or empty design.md")
         source_hash = state_source(Path(state["repo_root"]), state)["source_state_hash"]
         state["source_state_hash"] = source_hash
         state["reviews"][stage] = {
@@ -1136,6 +1182,10 @@ def record_review(run_dir: Path, stage: str, review: dict[str, Any]) -> dict[str
         if stage == "spec_review":
             state["artifact_hashes"]["spec"] = digest_file(
                 artifact_path(Path(state["repo_root"]), state, "spec")
+            )
+        elif stage == "design_review":
+            state["artifact_hashes"]["design"] = digest_file(
+                artifact_path(Path(state["repo_root"]), state, "design")
             )
         elif stage == "plan_review":
             for artifact in ("plan", "implementation_plan"):
@@ -1156,13 +1206,16 @@ def claude_review(
     prompt_path: Path,
     executable: str = "claude",
 ) -> dict[str, Any]:
-    state = load_state(run_dir)
+    state = refresh_state(run_dir)
+    if state["phase"] != stage:
+        raise HarnessError(f"cannot run {stage} while phase is {state['phase']}")
     config = load_config(run_dir / "snapshots" / "config.toml")
-    alias_name = config["assignments"][stage]
+    assignment = "plan_review" if stage == "design_review" else stage
+    alias_name = config["assignments"][assignment]
     alias = config["model_aliases"][alias_name]
     schema = read_json(run_dir / "snapshots" / "review.schema.json")
     manifest = read_json(manifest_path)
-    if manifest.get("assignment") != stage or manifest.get("role") != "semantic_reviewer":
+    if manifest.get("assignment") != assignment or manifest.get("role") != "semantic_reviewer":
         raise HarnessError("Claude review manifest must match its review stage")
     for key in ("add_dirs", "plugin_dirs", "mcp_configs"):
         values = manifest.get(key, [])
@@ -1553,7 +1606,7 @@ def parser() -> argparse.ArgumentParser:
     move.add_argument("--status", choices=sorted(STATUSES))
     approval = commands.add_parser("approve")
     approval.add_argument("run", type=Path)
-    approval.add_argument("artifact", choices=sorted(ARTIFACT_PHASE))
+    approval.add_argument("artifact", choices=sorted(APPROVAL_ARTIFACTS))
     abort_parser = commands.add_parser("abort")
     abort_parser.add_argument("run", type=Path)
     recover_parser = commands.add_parser("recover")

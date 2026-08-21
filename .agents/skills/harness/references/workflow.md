@@ -6,7 +6,7 @@
 2. [Run entry and preflight](#run-entry-and-preflight)
 3. [Artifacts and manifests](#artifacts-and-manifests)
 4. [Phases and statuses](#phases-and-statuses)
-5. [Specification and planning](#specification-and-planning)
+5. [Specification, design, and planning](#specification-design-and-planning)
 6. [Child execution](#child-execution)
 7. [Review and routing](#review-and-routing)
 8. [Verification and scope safety](#verification-and-scope-safety)
@@ -19,7 +19,7 @@ Use only these four harness roles:
 
 | Role | Responsibility | Writes project files |
 | --- | --- | --- |
-| planner | Clarify requirements, return specification/plan content, map ACs to evidence | Never directly; parent writes returned task documents atomically |
+| planner | Clarify requirements, return specification/design/plan content, map ACs to evidence | Never directly; parent writes returned task documents atomically |
 | worker | Implement one task inside an exclusive write scope and add its smallest relevant tests | Declared scope only |
 | deterministic verifier | Run selected commands and record exact evidence | Run artifacts only |
 | semantic reviewer | Find current requirement, contract, scope, and verification defects | Never |
@@ -32,7 +32,7 @@ For `$harness tasks/<task-id>`:
 
 1. Resolve the task path inside the Git repository and require `user_requests.md`.
 2. Before invoking the helper or any child, inspect `spec.md`. Treat it as unready when it is missing or empty, has material unresolved decisions, or lacks testable ACs. State the gaps and ask whether the user wants help deriving it from `user_requests.md`; do not create harness configuration or run artifacts.
-3. If the user accepts, conduct the specification dialogue directly in the parent using [Specification and planning](#specification-and-planning). Present the final draft after all material questions are settled, write `spec.md` only after explicit confirmation, then ask separately whether to start the delivery run. If the user declines or pauses, stop without starting a run.
+3. If the user accepts, conduct the specification dialogue directly in the parent using [Specification, design, and planning](#specification-design-and-planning). Present the final draft after all material questions are settled, write `spec.md` only after explicit confirmation, then ask separately whether to start the delivery run. If the user declines or pauses, stop without starting a run.
 4. Require a non-empty, settled `spec.md`, then invoke the helper only after the user explicitly confirms the delivery run should start.
 5. If `.harness/config.toml` is missing, atomically copy the bundled `assets/config.example.toml`; never overwrite an existing path. Then load and strictly validate the effective config.
 6. Inspect non-terminal runs for the same task. Resume the newest safe run; present pending input or approval when applicable. Ask before starting after a terminal run.
@@ -79,7 +79,7 @@ Record `depth = 1` and reject larger values. Do not persist conversation transcr
 Advance normally in this order:
 
 ```text
-spec -> spec_review -> plan -> plan_review -> baseline_verification
+spec -> spec_review -> design -> design_review -> plan -> plan_review -> baseline_verification
 -> implementation -> deterministic_verification -> acceptance_verification
 -> implementation_review -> completed
 ```
@@ -95,11 +95,11 @@ Allow only these statuses: `running`, `awaiting_input`, `awaiting_approval`, `co
 - Use `aborted` only after processing an explicit user stop request.
 - Treat all terminal statuses as immutable.
 
-## Specification and planning
+## Specification, design, and planning
 
-Spawn a fresh planner with the user request, relevant rules, necessary current code/spec/tests, and required output only.
+Spawn a fresh planner for each specification, design, or plan assignment with only the relevant rules, settled upstream artifacts, necessary current code/tests, and required output.
 
-For specification dialogue, require:
+For specification and design dialogue, require:
 
 - a provisional discussion map grouped as `must-decide`, `recommended`, and `no-confirmation`;
 - one material question at a time by default;
@@ -110,7 +110,11 @@ Persist only decisions, reasons, constraints, remaining items, and the current p
 
 When no material question remains, produce a spec with purpose, non-goals, behavior, errors, interruption/recovery, constraints, testable ACs, and backlog boundary.
 
-Map every AC in the plan to:
+After spec review and required approval, clear the saved discussion map and start design dialogue from the settled spec and relevant current-system evidence. Do not merely restate requirements or add speculative flexibility. When no material question remains, present a design draft covering architecture, component boundaries, data and control flow, interfaces and data models, errors and recovery, security/privacy, operations/deployment, constraints, rejected alternatives, and requirement traceability. Write `design.md` atomically only after explicit user confirmation.
+
+Run `design_review` with a fresh semantic reviewer using the configured `plan_review` assignment and both `spec.md` and `design.md`. Route Critical/High findings to a fresh planner correction in `design`, then repeat `design_review` with fresh context.
+
+Create the plan with a fresh planner using both the settled spec and reviewed design. The plan must implement the design and map every AC to:
 
 - an implementation or verification task;
 - an exclusive write scope and dependencies;
@@ -166,6 +170,7 @@ Route corrections exactly as follows:
 | Detection stage | Corrector | Return phase | Required fresh recheck |
 | --- | --- | --- | --- |
 | `spec_review` | planner assignment | `spec` | same `spec_review` assignment |
+| `design_review` | planner assignment | `design` | same `design_review` stage using the configured `plan_review` assignment |
 | `plan_review` | planner assignment | `plan` | same `plan_review` assignment |
 | `deterministic_verification` | worker owning failed scope | `implementation` | deterministic verification onward |
 | `acceptance_verification` | worker owning failed scope | `implementation` | deterministic and acceptance verification onward |
@@ -201,6 +206,7 @@ On a stale `running` run, compare the saved checkpoint, child status, artifact h
 Invalidate from the earliest changed dependency:
 
 - changed spec input: spec approval and every downstream artifact;
+- changed design: design, plan, implementation, verification, and review evidence after spec review;
 - changed plan: plan approval and implementation/verification/review evidence;
 - changed implementation plan: its approval and downstream implementation evidence;
 - changed project files: deterministic, acceptance, and implementation-review evidence.
@@ -210,6 +216,7 @@ Invalidate from the earliest changed dependency:
 Before `completed`, require all of:
 
 - settled spec, passed spec review, and required spec approval;
+- settled design and passed design review;
 - passed plan review and configured plan/implementation-plan approvals;
 - all planned tasks complete and no unresolved scope violation;
 - every required deterministic command passed;

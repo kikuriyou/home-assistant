@@ -1,6 +1,6 @@
 ---
 name: harness
-description: Run a resumable, evidence-backed software delivery workflow from requirements and specification through planning, implementation, deterministic verification, acceptance verification, and independent semantic review. Use when a user invokes $harness with a task directory or asks Codex to manage a coding task with fresh planner/worker subagents, Claude review, approvals, recovery, and AC-level evidence. Do not use for a simple answer or an isolated edit that does not need the harness workflow.
+description: Run a resumable, evidence-backed software delivery workflow from requirements and specification through interactive design, planning, implementation, deterministic verification, acceptance verification, and independent semantic review. Use when a user invokes $harness with a task directory or asks Codex to manage a coding task with fresh planner/worker subagents, Claude review, approvals, recovery, and AC-level evidence. Do not use for a simple answer or an isolated edit that does not need the harness workflow.
 ---
 
 # Agent Harness
@@ -10,7 +10,7 @@ Treat the supplied task documents as authoritative. Do not restart settled requi
 ## Enter the workflow
 
 1. Require a task directory, normally from `$harness tasks/<task-id>`.
-2. Read the nearest `AGENTS.md` and `user_requests.md`, then read `spec.md`, `plan.md`, and `backlog.md` when present. Never read archived task directories unless explicitly requested.
+2. Read the nearest `AGENTS.md` and `user_requests.md`, then read `spec.md`, `design.md`, `plan.md`, and `backlog.md` when present. Never read archived task directories unless explicitly requested.
 3. Read [references/workflow.md](references/workflow.md) before starting or resuming a run.
 4. Read [references/usage.md](references/usage.md) only for installation, invocation, status, recovery, or troubleshooting guidance.
 5. Run every deterministic-helper command through `uv run --no-cache --no-python-downloads --no-project --python 3.11 python .agents/skills/harness/scripts/harness.py`. Never invoke it with ambient `python` or `python3`, and do not recreate its checks in prose or ad hoc shell.
@@ -30,6 +30,12 @@ Before invoking the helper, spawning a child, or modifying project files:
 - Stop at `awaiting_input` when a planned write scope overlaps a starting user change.
 - Delay runtime/model availability checks until the first phase that needs that runtime.
 - Never install, update, reset, stash, checkout, roll back, or access production on the user's behalf.
+
+## Design before planning
+
+- After spec review and required approval, build `design.md` through the same one-question-at-a-time user dialogue used for specification. Present the completed draft and write it only after explicit confirmation.
+- Review the settled design independently with the configured `plan_review` assignment. Route Critical/High findings back to the planner and repeat `design_review` with fresh context.
+- Create and review `plan.md` from both the settled spec and reviewed design. Never skip directly from spec to plan.
 
 ## Delegate narrowly
 

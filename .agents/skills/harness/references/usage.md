@@ -43,7 +43,9 @@ $harness tasks/20260811 を中断して
 
 If `spec.md` is missing, empty, or still has material gaps, the harness does not start. It explains the gaps and asks whether to prepare the specification interactively from `user_requests.md`. When accepted, it asks one material question at a time, presents the completed draft for confirmation, and writes `spec.md` only after approval. Starting delivery requires a separate confirmation; no configuration or run artifacts are created before then.
 
-During specification dialogue, you can say “推奨案を採用”, “残りを一覧”, “このカテゴリを優先”, “一時停止”, or “backlogへ送る”. The parent resumes from saved decisions and pending input rather than replaying the conversation.
+After specification approval, the task artifact flow is `spec.md -> design.md -> plan.md`. The harness prepares `design.md` through the same interactive dialogue, writes it after explicit confirmation, and reviews it with the configured `plan_review` assignment before planning.
+
+During specification or design dialogue, you can say “推奨案を採用”, “残りを一覧”, “このカテゴリを優先”, “一時停止”, or “backlogへ送る”. The parent resumes from saved decisions and pending input rather than replaying the conversation.
 
 Run state and child/verification logs live under `.harness/runs/<run-id>/`. Task deliverables remain under the supplied task directory. Runtime logs are local and must not be committed.
 

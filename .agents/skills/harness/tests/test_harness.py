@@ -42,6 +42,9 @@ class Repo:
         (self.root / "app.py").write_text("def value():\n    return 1\n")
         (self.root / "tasks/example/user_requests.md").write_text("Change the value.\n")
         (self.root / "tasks/example/spec.md").write_text("# Spec\n\n- AC-01: value changes.\n")
+        (self.root / "tasks/example/design.md").write_text(
+            "# Design\n\nKeep the existing public function.\n"
+        )
         command = shlex.join([sys.executable, "-c", "raise SystemExit(0)"])
         (self.root / "tasks/example/plan.md").write_text(
             f"""# Plan
@@ -104,6 +107,10 @@ class HarnessTest(unittest.TestCase):
         self.assertFalse(resumed)
         self.assertEqual("spec", state["phase"])
         self.assertEqual("codex", state["parent_runtime"])
+        self.assertEqual(
+            harness.digest_file(self.repo.task / "design.md"),
+            state["artifact_hashes"]["design"],
+        )
         self.assertEqual("*\n", (self.repo.root / ".harness/runs/.gitignore").read_text())
         self.assertEqual("", run("git", "status", "--short", cwd=self.repo.root).stdout)
         self.assertTrue((run_dir / "snapshots/config.toml").is_file())
@@ -115,6 +122,15 @@ class HarnessTest(unittest.TestCase):
         self.assertTrue(resumed)
         self.assertEqual(run_dir, resumed_dir)
         self.assertEqual(state["run_id"], resumed_state["run_id"])
+
+        legacy = harness.load_state(run_dir)
+        legacy["phase"] = "plan"
+        legacy["artifact_hashes"].pop("design")
+        harness.save_state(run_dir, legacy)
+        (self.repo.task / "design.md").unlink()
+        _, resumed_state, resumed = self.repo.start()
+        self.assertTrue(resumed)
+        self.assertEqual("design", resumed_state["phase"])
 
     def test_start_requires_non_empty_spec_before_mutation(self) -> None:
         spec = self.repo.task / "spec.md"
@@ -147,9 +163,15 @@ class HarnessTest(unittest.TestCase):
     def test_transition_approval_and_terminal_protection(self) -> None:
         run_dir, _, _ = self.repo.start()
         harness.transition(run_dir, "spec_review")
+        harness.record_review(run_dir, "spec_review", {"findings": []})
         with self.assertRaises(harness.HarnessError):
-            harness.transition(run_dir, "plan")
+            harness.transition(run_dir, "design")
         harness.approve(run_dir, "spec")
+        harness.transition(run_dir, "design")
+        harness.transition(run_dir, "design_review")
+        with self.assertRaisesRegex(harness.HarnessError, "design_review must pass"):
+            harness.transition(run_dir, "plan")
+        harness.record_review(run_dir, "design_review", {"findings": []})
         state = harness.transition(run_dir, "plan")
         self.assertEqual("skipped", state["approvals"]["plan"]["status"])
         with self.assertRaises(harness.HarnessError):
@@ -267,6 +289,60 @@ class HarnessTest(unittest.TestCase):
         adopted = harness.update_discussion(run_dir, {"action": "adopt_recommendations"})
         self.assertEqual([], adopted["discussion"]["remaining"])
         self.assertEqual("running", adopted["status"])
+
+    def test_design_dialogue_review_and_invalidation(self) -> None:
+        run_dir, _, _ = self.repo.start()
+        state = harness.load_state(run_dir)
+        state["discussion"]["decisions"] = [{"issue_id": "spec", "choice": "settled"}]
+        harness.save_state(run_dir, state)
+        harness.transition(run_dir, "spec_review")
+        harness.record_review(run_dir, "spec_review", {"findings": []})
+        harness.approve(run_dir, "spec")
+        state = harness.transition(run_dir, "design")
+        self.assertEqual([], state["discussion"]["decisions"])
+
+        (self.repo.task / "design.md").unlink()
+        with self.assertRaisesRegex(harness.HarnessError, "non-empty design.md"):
+            harness.transition(run_dir, "design_review")
+        proposal = self.repo.task / "proposal.md"
+        proposal.write_text("# Design\n\nKeep the public API.\n")
+        harness.write_artifact(run_dir, "design", proposal)
+        harness.transition(run_dir, "design_review")
+        failed = harness.record_review(
+            run_dir, "design_review", {"findings": [self.finding("high")]}
+        )
+        self.assertEqual("design", failed["reviews"]["design_review"]["route"]["phase"])
+        harness.transition(run_dir, "design")
+        harness.transition(run_dir, "design_review")
+        with (self.repo.task / "design.md").open("a") as stream:
+            stream.write("\nExternal edit before review recording.\n")
+        with self.assertRaisesRegex(harness.HarnessError, "phase is design"):
+            harness.record_review(run_dir, "design_review", {"findings": []})
+        harness.transition(run_dir, "design_review")
+        harness.record_review(run_dir, "design_review", {"findings": []})
+        harness.transition(run_dir, "plan")
+        harness.transition(run_dir, "plan_review")
+        harness.record_review(run_dir, "plan_review", {"findings": []})
+        harness.transition(run_dir, "implementation")
+        harness.transition(run_dir, "deterministic_verification")
+        harness.transition(run_dir, "acceptance_verification")
+        harness.transition(run_dir, "implementation_review")
+        harness.record_review(run_dir, "implementation_review", {"findings": []})
+        state = harness.load_state(run_dir)
+        state["verification"]["deterministic"] = [{"success": True}]
+        state["verification"]["acceptance"] = [{"success": True}]
+        harness.save_state(run_dir, state)
+
+        with (self.repo.task / "design.md").open("a") as stream:
+            stream.write("\nChanged.\n")
+        state = harness.refresh_state(run_dir)
+        self.assertEqual("design", state["phase"])
+        self.assertEqual("approved", state["approvals"]["spec"]["status"])
+        self.assertIn("spec_review", state["reviews"])
+        for stage in ("design_review", "plan_review", "implementation_review"):
+            self.assertNotIn(stage, state["reviews"])
+        self.assertEqual([], state["verification"]["deterministic"])
+        self.assertEqual([], state["verification"]["acceptance"])
 
     def test_fresh_planner_manifest_and_revision_route(self) -> None:
         run_dir, _, _ = self.repo.start()
@@ -427,6 +503,10 @@ Public function name remains. AC-02
         with self.assertRaises(harness.HarnessError):
             harness.validate_review({"findings": [self.finding(), self.finding()]})
         self.assertEqual("planner", harness.correction_route("plan_review")["assignment"])
+        self.assertEqual(
+            {"assignment": "planner", "phase": "design", "recheck": "design_review"},
+            harness.correction_route("design_review"),
+        )
         self.assertEqual("worker", harness.correction_route("implementation_review")["assignment"])
         self.assertEqual(
             "deterministic_verification",
@@ -510,16 +590,21 @@ Public function name remains. AC-02
 
     def test_claude_review_records_fresh_agent_metadata(self) -> None:
         run_dir, _, _ = self.repo.start()
+        harness.transition(run_dir, "spec_review")
+        harness.record_review(run_dir, "spec_review", {"findings": []})
+        harness.approve(run_dir, "spec")
+        harness.transition(run_dir, "design")
+        harness.transition(run_dir, "design_review")
         manifest_path = self.repo.task / "review-manifest.json"
         prompt_path = self.repo.task / "review-prompt.txt"
         manifest_path.write_text(
             json.dumps(
                 {
                     "role": "semantic_reviewer",
-                    "assignment": "spec_review",
-                    "objective": "Review the specification.",
+                    "assignment": "plan_review",
+                    "objective": "Review the design.",
                     "ac_ids": ["AC-01"],
-                    "read_paths": ["tasks/example/spec.md"],
+                    "read_paths": ["tasks/example/spec.md", "tasks/example/design.md"],
                     "write_scope": [],
                     "dependencies": [],
                     "output": "Canonical review JSON.",
@@ -528,10 +613,10 @@ Public function name remains. AC-02
                 }
             )
         )
-        prompt_path.write_text("Review only the supplied specification.")
+        prompt_path.write_text("Review only the supplied design against the specification.")
         outcome = harness.claude_review(
             run_dir,
-            "spec_review",
+            "design_review",
             manifest_path,
             prompt_path,
             str(self.fake_claude("success")),
@@ -540,9 +625,10 @@ Public function name remains. AC-02
         state = harness.load_state(run_dir)
         agent = state["agents"][0]
         self.assertEqual("semantic_reviewer", agent["role"])
+        self.assertEqual("plan_review", agent["assignment"])
         self.assertEqual(1, agent["depth"])
         self.assertEqual("completed", agent["status"])
-        self.assertTrue(state["reviews"]["spec_review"]["passed"])
+        self.assertTrue(state["reviews"]["design_review"]["passed"])
         self.assertTrue((run_dir / f"snapshots/inputs/{agent['invocation_id']}.json").is_file())
 
     def test_depth_parallel_scopes_and_scope_violation(self) -> None:
@@ -601,12 +687,22 @@ Public function name remains. AC-02
     def passing_command():
         return [sys.executable, "-c", "raise SystemExit(0)"]
 
-    def prepare_completion(self, *, acceptance: bool = True, medium: bool = False):
-        run_dir, _, _ = self.repo.start()
-        harness.approve(run_dir, "spec")
+    def prepare_completion(
+        self, *, acceptance: bool = True, medium: bool = False, new: bool = False
+    ):
+        run_dir, _, _ = harness.start_run(self.repo.task, allow_new_after_terminal=new)
+        harness.transition(run_dir, "spec_review")
         harness.record_review(run_dir, "spec_review", {"findings": []})
+        harness.approve(run_dir, "spec")
+        harness.transition(run_dir, "design")
+        harness.transition(run_dir, "design_review")
+        harness.record_review(run_dir, "design_review", {"findings": []})
+        harness.transition(run_dir, "plan")
+        harness.transition(run_dir, "plan_review")
         harness.record_review(run_dir, "plan_review", {"findings": []})
+        harness.transition(run_dir, "implementation")
         harness.mark_implementation_complete(run_dir)
+        harness.transition(run_dir, "deterministic_verification")
         harness.run_verification(
             run_dir,
             "deterministic",
@@ -614,6 +710,7 @@ Public function name remains. AC-02
             selection_source="plan",
             ac_ids=["AC-01"],
         )
+        harness.transition(run_dir, "acceptance_verification")
         if acceptance:
             harness.run_verification(
                 run_dir,
@@ -622,6 +719,7 @@ Public function name remains. AC-02
                 selection_source="plan",
                 ac_ids=["AC-01"],
             )
+        harness.transition(run_dir, "implementation_review")
         findings = [self.finding()] if medium else []
         harness.record_review(run_dir, "implementation_review", {"findings": findings})
         return run_dir
@@ -666,24 +764,7 @@ Public function name remains. AC-02
             harness.complete_run(missing)
         harness.abort(missing)
 
-        run_dir, _, _ = harness.start_run(self.repo.task, allow_new_after_terminal=True)
-        harness.approve(run_dir, "spec")
-        for stage in ("spec_review", "plan_review"):
-            harness.record_review(run_dir, stage, {"findings": []})
-        harness.mark_implementation_complete(run_dir)
-        for kind in ("deterministic", "acceptance"):
-            harness.run_verification(
-                run_dir,
-                kind,
-                self.passing_command(),
-                selection_source="plan",
-                ac_ids=["AC-01"],
-            )
-        harness.record_review(
-            run_dir,
-            "implementation_review",
-            {"findings": [self.finding()]},
-        )
+        run_dir = self.prepare_completion(medium=True, new=True)
         state = harness.complete_run(run_dir)
         self.assertEqual("completed", state["status"])
         self.assertTrue(any((run_dir / "verification/e2e").glob("acceptance-*.json")))
@@ -705,6 +786,9 @@ Public function name remains. AC-02
         harness.transition(run_dir, "spec_review")
         harness.record_review(run_dir, "spec_review", {"findings": []})
         harness.approve(run_dir, "spec")
+        harness.transition(run_dir, "design")
+        harness.transition(run_dir, "design_review")
+        harness.record_review(run_dir, "design_review", {"findings": []})
         harness.transition(run_dir, "plan")
         harness.transition(run_dir, "plan_review")
         harness.record_review(run_dir, "plan_review", {"findings": []})
@@ -712,6 +796,7 @@ Public function name remains. AC-02
             stream.write("\nChanged after review.\n")
         state = harness.refresh_state(run_dir)
         self.assertEqual("plan", state["phase"])
+        self.assertIn("design_review", state["reviews"])
         self.assertNotIn("plan_review", state["reviews"])
 
     def test_parent_writes_planner_artifact_atomically(self) -> None:
@@ -724,6 +809,14 @@ Public function name remains. AC-02
         self.assertEqual(
             harness.digest_file(self.repo.task / "spec.md"),
             state["artifact_hashes"]["spec"],
+        )
+        proposal.write_text("# Revised design\n\nKeep the public API.\n")
+        state = harness.write_artifact(run_dir, "design", proposal)
+        self.assertEqual("design", state["phase"])
+        self.assertEqual(proposal.read_text(), (self.repo.task / "design.md").read_text())
+        self.assertEqual(
+            harness.digest_file(self.repo.task / "design.md"),
+            state["artifact_hashes"]["design"],
         )
 
     def test_fixture_model_less_workflow(self) -> None:
@@ -745,6 +838,9 @@ Keep the public function and change its value.
 
 - AC-01: value() and the CLI print 2.
 """
+        )
+        task.joinpath("design.md").write_text(
+            "# Design\n\nKeep the public function and update its return value.\n"
         )
         command = shlex.join([sys.executable, "-m", "unittest", "-v", "test_app.py"])
         task.joinpath("plan.md").write_text(
@@ -782,6 +878,9 @@ Keep the public function and change its value.
         harness.transition(run_dir, "spec_review")
         harness.record_review(run_dir, "spec_review", {"findings": []})
         harness.approve(run_dir, "spec")
+        harness.transition(run_dir, "design")
+        harness.transition(run_dir, "design_review")
+        harness.record_review(run_dir, "design_review", {"findings": []})
         harness.transition(run_dir, "plan")
         harness.transition(run_dir, "plan_review")
         harness.record_review(run_dir, "plan_review", {"findings": []})
